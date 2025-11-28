@@ -34,8 +34,8 @@ func StartApi(addr string) {
 	// serveMux.HandleFunc("POST /game-api/", gameapi)
 	serveMux.HandleFunc("/game-api/", gameapi)
 	serveMux.HandleFunc("/game-rtp-api/", gamertpapi)
-	serveMux.HandleFunc("/web-api/auth/session/v2/verifyOperatorPlayerSession", wrapWebApi(verifyOperatorPlayerSession, true))
-	serveMux.HandleFunc("/web-api/auth/session/v2/verifySession", wrapWebApi(verifySession, true))
+	serveMux.HandleFunc("/web-api/auth/session/v2/verifyOperatorPlayerSession", wrapWebApi(verifyOperatorPlayerSession, false))
+	serveMux.HandleFunc("/web-api/auth/session/v2/verifySession", wrapWebApi(verifySession, false))
 	serveMux.HandleFunc("/web-api/game-proxy/v2/BetSummary/Get", wrapWebApi(getBetSummary, true))
 	serveMux.HandleFunc("/web-api/game-proxy/v2/BetHistory/Get", wrapWebApi(getBetHistory, true))
 	serveMux.HandleFunc("/web-api/game-proxy/v2/GameWallet/Get", wrapWebApi(getGameWallet, true))
@@ -63,13 +63,20 @@ func wrapWebApi[R any](fn func(*PGParams, *R) error, verify bool) http.HandlerFu
 		)
 
 		traceId := r.URL.Query().Get("traceId")
+
+		// Recover from panics to prevent service crashes
 		defer func() {
+			if rec := recover(); rec != nil {
+				log.Printf("PANIC in wrapWebApi: %v", rec)
+				err = fmt.Errorf("panic: %v", rec)
+			}
+
 			if r.URL.Path == "/back-office-proxy/Report/GetBetHistory" {
 				w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate")
 				w.Header().Set("Pragma", "no-cache")
 				w.Header().Set("Expires", "0")
 			}
-			w.Header().Set("Access-Control-Allow-Origin", "*")
+			// w.Header().Set("Access-Control-Allow-Origin", "*")
 			w.Header().Set("Content-Type", "application/json")
 			if err != nil {
 				ret.Err = &PGError{}
@@ -110,13 +117,19 @@ func wrapWebApi[R any](fn func(*PGParams, *R) error, verify bool) http.HandlerFu
 			}
 		}
 
-		blocked, ip, loc := gamedata.IsBlockLoc(r)
 		gi := r.FormValue("gi")
-		fmt.Printf("userid=%d,gameid=%s,ip=%s,loc=%s\n", pid, "pg_"+gi, ip, loc)
-		insertLoginDetail(pid, gi, ip, loc)
-		if blocked {
-			err = define.NewErrCode("Your country or region is restricted", 1306)
-			return
+
+		// Skip location check and logging when verify is disabled (for testing)
+		if verify {
+			blocked, ip, loc := gamedata.IsBlockLoc(r)
+			fmt.Printf("userid=%d,gameid=%s,ip=%s,loc=%s\n", pid, "pg_"+gi, ip, loc)
+			if pid > 0 {
+				insertLoginDetail(pid, gi, ip, loc)
+			}
+			if blocked {
+				err = define.NewErrCode("Your country or region is restricted", 1306)
+				return
+			}
 		}
 
 		ps := &PGParams{
