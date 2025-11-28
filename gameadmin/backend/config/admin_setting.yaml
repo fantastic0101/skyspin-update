@@ -1,0 +1,8 @@
+IsDevEnv: true
+OpenWhite: false
+IconAddr: https://admin.xoioplay.com
+DefaultPermissionId: 169
+Alert:
+  Hour: false
+WhiteIps:
+  - 127.0.0.1
